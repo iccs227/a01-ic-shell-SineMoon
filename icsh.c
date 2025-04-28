@@ -1,7 +1,7 @@
 /* ICCS227: Project 1: icsh
  * Name: Cherlyn Wijitthadarat
  * StudentID: 6480330
- * Tag: 0.1.0
+ * Tag: 0.2.0
  */
 
 #include "stdio.h"
@@ -45,6 +45,7 @@ void printToken(char** token, int start) {
 }
 
 void command(char** curr, char** prev) {
+
     /* Turns prev to str */
     char* prev_output = calloc(MAX_LINE_LENGTH, sizeof(char));
     strcpy(prev_output, "");
@@ -56,7 +57,7 @@ void command(char** curr, char** prev) {
     /* !! */
     if (strcmp(curr[0], "!!") == 0 && curr[1] == NULL) {
         if (strcmp(prev_output, "") != 0) {
-            printf("%s %s\n", prev[0], prev_output);
+            /* printf("%s %s\n", prev[0], prev_output); */
             printf("%s\n", prev_output);
         } else {
             printf("No previous output\n");
@@ -65,16 +66,17 @@ void command(char** curr, char** prev) {
         /* echo */
         if (strcmp(curr[0], "echo") == 0 && curr[1] != NULL) {
             printToken(curr, 1);
+	    
         /* exit */
         } else if (strcmp(curr[0], "exit") == 0 && curr[2] == NULL) {
-            printf("bye\n");
-            int n = atoi(curr[1]);
-            if (n > 255) {
-                n = n & 0xFF;
+            int e  = atoi(curr[1]);
+            if (e > 255) {
+                e  = e & 0xFF;
             }
-            exit(n);
+	    printf("$ echo $?\n%d\n$\n", e);
+            exit(e);
 	} else if (strcmp(curr[0], "exit") == 0 && curr[1] == NULL) {
-            printf("bye\n");
+            printf("$ echo $?\n0\n$\n");
             exit(0);
         } else {
             printf("bad command\n");
@@ -84,20 +86,51 @@ void command(char** curr, char** prev) {
     free(prev_output);
 }
 
-int main() {
-    char buffer[MAX_CMD_BUFFER];
-    char** prevBuffer = toTokens(buffer); 
-    printf("Starting IC shell\n");
-
-    while (1) {
-        printf("icsh $ ");
-        fgets(buffer, MAX_CMD_BUFFER, stdin);
-	buffer[strcspn(buffer, "\n")] = '\0';
-	if (strlen(buffer) == 0) { continue;}
-        char** currBuffer = toTokens(buffer); 
-        command(currBuffer, prevBuffer);
-        prevBuffer = copyTokens(currBuffer);
-        free(currBuffer);
+void readScript(char* fileName) {
+    FILE *file = fopen(fileName, "r");
+    if (file == NULL) {
+        printf("Invalid Filename\n");
     }
-    return 0;
+    else {
+    	char buffer[MAX_CMD_BUFFER];
+    	char** prevBuffer = toTokens(buffer);
+
+    	while (fgets(buffer, MAX_LINE_LENGTH, file) != NULL) {
+        	buffer[strcspn(buffer, "\n")] = '\0'; 
+	       	if (strlen(buffer) == 0) { continue; }
+
+		char** currBuffer = toTokens(buffer);
+		command(currBuffer, prevBuffer);
+     
+        	prevBuffer = copyTokens(currBuffer);
+        	free(currBuffer);
+   	}
+   	fclose(file);
+    }
+    return;
+}
+
+int main(int arg, char *argv[]) {
+	if(arg > 1) {
+	       readScript(argv[1]);
+	} else{
+		char buffer[MAX_CMD_BUFFER];
+    		char** prevBuffer = toTokens(buffer); 
+    		printf("Starting IC shell\n");
+
+	    while (1) {
+        	printf("icsh $ ");
+        	fgets(buffer, MAX_CMD_BUFFER, stdin);
+
+		buffer[strcspn(buffer, "\n")] = '\0';
+		if (strlen(buffer) == 0) { continue;}
+
+	        char** currBuffer = toTokens(buffer); 
+	        command(currBuffer, prevBuffer);
+
+	        prevBuffer = copyTokens(currBuffer);
+	        free(currBuffer);
+	    }
+	}
+    	return 0;
 }
