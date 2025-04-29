@@ -1,10 +1,10 @@
-CC=gcc
+CC=g++
 CFLAGS=-Wall -g 
 BINARY=icsh
 
 all: icsh
 
-icsh: icsh.c
+icsh: icsh.cpp
 	$(CC) -o $(BINARY) $(CFLAGS) $<
 
 .PHONY: clean
