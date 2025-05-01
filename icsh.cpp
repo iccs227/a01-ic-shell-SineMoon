@@ -1,7 +1,7 @@
 /* ICCS227: Project 1: icsh
  * Name: Cherlyn Wijitthadarat
  * StudentID: 6480330
- * Tag: 0.2.0
+ * Tag: 0.3.0
  */
 
 #include <iostream>
@@ -9,6 +9,9 @@
 #include <vector>
 #include <string>
 #include <fstream>
+#include <unistd.h>     
+#include <sys/types.h>  
+#include <sys/wait.h>
 
 using namespace std;
 
@@ -27,6 +30,30 @@ void printToken(const vector<string>& tokens, size_t start) {
         cout << tokens[i] << " ";
     }
     cout << endl;
+}
+
+void externalCommand(vector<string>& curr) {
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("Fork failed");
+        exit(1);
+    }
+
+    if (pid == 0) { 
+        vector<char*> execArgs;
+        for (auto& token : curr) {
+            execArgs.push_back(&token[0]);
+        }
+        execArgs.push_back(nullptr);
+
+        if (execvp(execArgs[0], execArgs.data()) == -1) {
+            cout << "bad command" << endl;
+            exit(1);
+        }
+    } else {  
+        waitpid(pid, nullptr, 0);
+    }
 }
 
 void command(vector<string>& curr, vector<string>& prev) {
@@ -54,8 +81,7 @@ void command(vector<string>& curr, vector<string>& prev) {
             cout << "$ echo $?\n0\n$" << endl;
             exit(0);
         } else {
-            cout << "bad command" << endl;
-            exit(1);
+            externalCommand(curr);
         }
         prev = curr;
     }
