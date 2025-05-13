@@ -1,0 +1,9 @@
+total 256
+-rwxrwxr-x 1 cherlyn cherlyn 232744 May 13 14:50 icsh
+-rw-rw-r-- 1 cherlyn cherlyn   6248 May 13 14:50 icsh.cpp
+-rw-rw-r-- 1 cherlyn cherlyn     51 May  7 12:24 input.txt
+-rw-rw-r-- 1 cherlyn cherlyn    136 Apr 29 13:48 Makefile
+-rw-r--r-- 1 cherlyn cherlyn      0 May 13 14:57 output.txt
+-rw-rw-r-- 1 cherlyn cherlyn    271 Apr 26 20:25 README.md
+-rw-r--r-- 1 cherlyn cherlyn     12 May 13 14:56 testmile5.txt
+-rw-rw-r-- 1 cherlyn cherlyn     33 May  8 16:18 test.sh

@@ -1,7 +1,7 @@
 /* ICCS227: Project 1: icsh
  * Name: Cherlyn Wijitthadarat
  * StudentID: 6480330
- * Tag: 0.4.0
+ * Tag: 0.5.0
  */
 
 #include <iostream>
@@ -13,10 +13,11 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <fcntl.h>
 
 using namespace std;
 
-pid_t fgJob = 0; // Foreground job for signal handling
+pid_t fgJob = 0;
 
 vector<string> toTokens(const string& buffer) {
     vector<string> tokens;
@@ -47,17 +48,74 @@ void handleSignal(int sig) {
     }
 }
 
+vector<string> IORedir(const vector<string>& curr, int& inFd, int& outFd) {
+    vector<string> cmdWithoutRedir;
+
+    for (size_t i = 0; i < curr.size(); ++i) {
+        if (curr[i] == "<") {
+            if (i + 1 < curr.size()) {
+                inFd = open(curr[i + 1].c_str(), O_RDONLY);
+                if (inFd == -1) {
+                    perror("Input file error");
+                    return {};
+                }
+                i++;
+            }
+        } else if (curr[i] == ">") {
+            if (i + 1 < curr.size()) {
+                outFd = open(curr[i + 1].c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (outFd == -1) {
+                    perror("Output file error");
+                    return {};
+                }
+                i++;
+            }
+        } else {
+            cmdWithoutRedir.push_back(curr[i]);
+        }
+    }
+
+    return cmdWithoutRedir;
+}
+
 int externalCommand(vector<string>& curr) {
+    int inFd = -1;
+    int outFd = -1;
+
+    vector<string> cmdWithoutRedir = IORedir(curr, inFd, outFd);
+
+    if (cmdWithoutRedir.empty() && !curr.empty()) {
+        return 1;
+    }
+
     pid_t pid = fork();
 
     if (pid < 0) {
         perror("Fork failed");
+        if (inFd != -1) close(inFd);
+        if (outFd != -1) close(outFd);
         return 1;
     }
 
     if (pid == 0) {
+        if (inFd != -1) {
+            if (dup2(inFd, STDIN_FILENO) == -1) {
+                perror("dup2 for stdin");
+                exit(1);
+            }
+            close(inFd);
+        }
+
+        if (outFd != -1) {
+            if (dup2(outFd, STDOUT_FILENO) == -1) {
+                perror("dup2 for stdout");
+                exit(1);
+            }
+            close(outFd);
+        }
+
         vector<char*> execArgs;
-        for (auto& token : curr) {
+        for (auto& token : cmdWithoutRedir) {
             execArgs.push_back(&token[0]);
         }
         execArgs.push_back(nullptr);
@@ -67,6 +125,9 @@ int externalCommand(vector<string>& curr) {
             exit(1);
         }
     } else {
+        if (inFd != -1) close(inFd);
+        if (outFd != -1) close(outFd);
+
         fgJob = pid;
         int status;
         waitpid(pid, &status, 0);
@@ -78,6 +139,7 @@ int externalCommand(vector<string>& curr) {
             return 1;
         }
     }
+
     return 1;
 }
 
@@ -98,8 +160,32 @@ void command(vector<string>& curr, vector<string>& prev, int& lastExitStatus) {
         lastExitStatus = 0;
     } else {
         if (curr[0] == "echo" && curr.size() > 1) {
-            printToken(curr, 1);
-            lastExitStatus = 0;
+            int inFd = -1;
+            int outFd = -1;
+            vector<string> cmdWithoutRedir = IORedir(curr, inFd, outFd);
+
+            if (!cmdWithoutRedir.empty()) {
+                int stdoutBackup = -1;
+                if (outFd != -1) {
+                    stdoutBackup = dup(STDOUT_FILENO);
+                    dup2(outFd, STDOUT_FILENO);
+                }
+
+                for (size_t i = 1; i < cmdWithoutRedir.size(); ++i) {
+                    cout << cmdWithoutRedir[i] << " ";
+                }
+                cout << endl;
+
+                if (outFd != -1) {
+                    dup2(stdoutBackup, STDOUT_FILENO);
+                    close(stdoutBackup);
+                    close(outFd);
+                }
+
+                lastExitStatus = 0;
+            } else {
+                lastExitStatus = 1;
+            }
         } else if (curr[0] == "exit" && curr.size() == 2) {
             cout << "$ echo $?\n";
             int e = stoi(curr[1]);
