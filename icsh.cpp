@@ -53,8 +53,12 @@ vector<string> IORedir(const vector<string>& curr, int& inFd, int& outFd) {
 
     for (size_t i = 0; i < curr.size(); ++i) {
         if (curr[i] == "<") {
-            if (i + 1 < curr.size()) {
-                inFd = open(curr[i + 1].c_str(), O_RDONLY);
+            if (i + 1 >= curr.size() || curr[i + 1].empty()) {
+		    cerr << "icsh: no input file specified" << endl;
+		    return {};
+	    }
+		inFd = open(curr[i + 1].c_str(), O_RDONLY);
+
                 if (inFd == -1) {
                     perror("Input file error");
                     return {};
@@ -62,8 +66,12 @@ vector<string> IORedir(const vector<string>& curr, int& inFd, int& outFd) {
                 i++;
             }
         } else if (curr[i] == ">") {
-            if (i + 1 < curr.size()) {
-                outFd = open(curr[i + 1].c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (i + 1 >= curr.size() || curr[i + 1].empty()) {
+		    cerr << "icsh: no output file specified" << endl;
+    		return {};
+	    }
+		outFd = open(curr[i + 1].c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
                 if (outFd == -1) {
                     perror("Output file error");
                     return {};
