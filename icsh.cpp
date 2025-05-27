@@ -54,30 +54,26 @@ vector<string> IORedir(const vector<string>& curr, int& inFd, int& outFd) {
     for (size_t i = 0; i < curr.size(); ++i) {
         if (curr[i] == "<") {
             if (i + 1 >= curr.size() || curr[i + 1].empty()) {
-		    cerr << "icsh: no input file specified" << endl;
-		    return {};
-	    }
-		inFd = open(curr[i + 1].c_str(), O_RDONLY);
-
-                if (inFd == -1) {
-                    perror("Input file error");
-                    return {};
-                }
-                i++;
+                cerr << "icsh: no input file specified" << endl;
+                return {};
             }
+            inFd = open(curr[i + 1].c_str(), O_RDONLY);
+            if (inFd == -1) {
+                perror("Input file error");
+                return {};
+            }
+            i++; // Skip the filename
         } else if (curr[i] == ">") {
             if (i + 1 >= curr.size() || curr[i + 1].empty()) {
-		    cerr << "icsh: no output file specified" << endl;
-    		return {};
-	    }
-		outFd = open(curr[i + 1].c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-
-                if (outFd == -1) {
-                    perror("Output file error");
-                    return {};
-                }
-                i++;
+                cerr << "icsh: no output file specified" << endl;
+                return {};
             }
+            outFd = open(curr[i + 1].c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (outFd == -1) {
+                perror("Output file error");
+                return {};
+            }
+            i++; // Skip the filename
         } else {
             cmdWithoutRedir.push_back(curr[i]);
         }
@@ -93,6 +89,9 @@ int externalCommand(vector<string>& curr) {
     vector<string> cmdWithoutRedir = IORedir(curr, inFd, outFd);
 
     if (cmdWithoutRedir.empty() && !curr.empty()) {
+        // Clean up file descriptors before returning
+        if (inFd != -1) close(inFd);
+        if (outFd != -1) close(outFd);
         return 1;
     }
 
@@ -106,6 +105,7 @@ int externalCommand(vector<string>& curr) {
     }
 
     if (pid == 0) {
+        // Child process
         if (inFd != -1) {
             if (dup2(inFd, STDIN_FILENO) == -1) {
                 perror("dup2 for stdin");
@@ -133,6 +133,7 @@ int externalCommand(vector<string>& curr) {
             exit(1);
         }
     } else {
+        // Parent process
         if (inFd != -1) close(inFd);
         if (outFd != -1) close(outFd);
 
@@ -154,9 +155,21 @@ int externalCommand(vector<string>& curr) {
 void command(vector<string>& curr, vector<string>& prev, int& lastExitStatus) {
     if (curr.empty()) return;
 
-    if (curr[0] == "!!" && curr.size() == 1) {
+    // Handle !! command - need to check for redirection in the current command
+    if (curr[0] == "!!") {
         if (!prev.empty()) {
-            command(prev, prev, lastExitStatus);
+            // If there are redirection operators in curr (after !!), we need to handle them
+            if (curr.size() > 1) {
+                // Combine previous command with current redirection
+                vector<string> combinedCmd = prev;
+                for (size_t i = 1; i < curr.size(); ++i) {
+                    combinedCmd.push_back(curr[i]);
+                }
+                command(combinedCmd, prev, lastExitStatus);
+            } else {
+                // Just execute previous command as-is
+                command(prev, prev, lastExitStatus);
+            }
         } else {
             cout << "No previous output" << endl;
         }
@@ -166,48 +179,53 @@ void command(vector<string>& curr, vector<string>& prev, int& lastExitStatus) {
     if (curr[0] == "echo" && curr.size() == 2 && curr[1] == "$?") {
         cout << lastExitStatus << endl;
         lastExitStatus = 0;
-    } else {
-        if (curr[0] == "echo" && curr.size() > 1) {
-            int inFd = -1;
-            int outFd = -1;
-            vector<string> cmdWithoutRedir = IORedir(curr, inFd, outFd);
+    } else if (curr[0] == "echo" && curr.size() > 1) {
+        int inFd = -1;
+        int outFd = -1;
+        vector<string> cmdWithoutRedir = IORedir(curr, inFd, outFd);
 
-            if (!cmdWithoutRedir.empty()) {
-                int stdoutBackup = -1;
-                if (outFd != -1) {
-                    stdoutBackup = dup(STDOUT_FILENO);
-                    dup2(outFd, STDOUT_FILENO);
-                }
-
-                for (size_t i = 1; i < cmdWithoutRedir.size(); ++i) {
-                    cout << cmdWithoutRedir[i] << " ";
-                }
-                cout << endl;
-
-                if (outFd != -1) {
-                    dup2(stdoutBackup, STDOUT_FILENO);
-                    close(stdoutBackup);
-                    close(outFd);
-                }
-
-                lastExitStatus = 0;
-            } else {
-                lastExitStatus = 1;
+        if (!cmdWithoutRedir.empty()) {
+            int stdoutBackup = -1;
+            if (outFd != -1) {
+                stdoutBackup = dup(STDOUT_FILENO);
+                dup2(outFd, STDOUT_FILENO);
             }
-        } else if (curr[0] == "exit" && curr.size() == 2) {
-            cout << "$ echo $?\n";
+
+            for (size_t i = 1; i < cmdWithoutRedir.size(); ++i) {
+                cout << cmdWithoutRedir[i];
+                if (i < cmdWithoutRedir.size() - 1) cout << " ";
+            }
+            cout << endl;
+
+            if (outFd != -1) {
+                dup2(stdoutBackup, STDOUT_FILENO);
+                close(stdoutBackup);
+                close(outFd);
+            }
+
+            lastExitStatus = 0;
+        } else {
+            lastExitStatus = 1;
+        }
+    } else if (curr[0] == "exit") {
+        if (curr.size() == 2) {
+            cout << "$ echo $?" << endl;
             int e = stoi(curr[1]);
             if (e > 255) {
                 e = e & 0xFF;
             }
             cout << e << endl;
             exit(e);
-        } else if (curr[0] == "exit" && curr.size() == 1) {
-            cout << "$ echo $?\n0\n$" << endl;
-            exit(0);
         } else {
-            lastExitStatus = externalCommand(curr);
+            cout << "$ echo $?" << endl << "0" << endl << "$" << endl;
+            exit(0);
         }
+    } else {
+        lastExitStatus = externalCommand(curr);
+    }
+    
+    // Update previous command only if current command is not !!
+    if (curr[0] != "!!") {
         prev = curr;
     }
 }
