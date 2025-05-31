@@ -1,7 +1,7 @@
 /* ICCS227: Project 1: icsh
  * Name: Cherlyn Wijitthadarat
  * StudentID: 6480330
- * Tag: 0.6.0
+ * Tag: 0.7.0
  */
 
 #include <iostream>
@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <map>
 #include <termios.h>
+#include <deque>
 
 using namespace std;
 
@@ -33,6 +34,146 @@ pid_t fgJob = 0;
 map<int, Job> jobs;           // Map to store active jobs
 int nextJobId = 1;            // Counter for job IDs
 pid_t shellPgid;              // Shell's process group ID
+
+// History management
+deque<string> commandHistory;
+const size_t MAX_HISTORY_SIZE = 1000;
+int historyIndex = -1;
+string currentInput;
+
+// Terminal state management
+struct termios originalTermios;
+bool rawModeEnabled = false;
+
+// Enable raw mode for capturing arrow keys
+void enableRawMode() {
+    if (rawModeEnabled) return;
+    
+    tcgetattr(STDIN_FILENO, &originalTermios);
+    struct termios raw = originalTermios;
+    
+    raw.c_lflag &= ~(ECHO | ICANON);
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+    
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    rawModeEnabled = true;
+}
+
+// Disable raw mode
+void disableRawMode() {
+    if (!rawModeEnabled) return;
+    
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalTermios);
+    rawModeEnabled = false;
+}
+
+// Add command to history
+void addToHistory(const string& command) {
+    if (command.empty()) return;
+    
+    // No add duplicate consecutive 
+    if (!commandHistory.empty() && commandHistory.back() == command) {
+        return;
+    }
+    
+    commandHistory.push_back(command);
+   
+    if (commandHistory.size() > MAX_HISTORY_SIZE) {
+        commandHistory.pop_front();
+    } 
+    historyIndex = -1; // Reset history navigation
+}
+
+// Get command from history
+string getHistoryCommand(int index) {
+    if (index < 0 || index >= (int)commandHistory.size()) {
+        return "";
+    }
+    return commandHistory[commandHistory.size() - 1 - index];
+}
+
+// Clear current line and rewrite with new content
+void updateInputLine(const string& input, const string& prompt) {
+    cout << "\r"; // Move cursor begin line
+    cout << "\033[K"; // Clear entire line
+    cout << prompt << input; // Print prompt & current
+    cout.flush();
+}
+
+// Read input with history navigation support
+string readInputWithHistory(const string& prompt) {
+    cout << prompt;
+    cout.flush();
+    
+    string input;
+    historyIndex = -1;
+    currentInput.clear();
+    
+    enableRawMode();
+    
+    char c;
+    while (read(STDIN_FILENO, &c, 1) == 1) {
+        if (c == '\n' || c == '\r') {
+            cout << endl; // Enter pressed
+            break;
+        } else if (c == 127 || c == 8) {
+            // Backspace
+            if (!input.empty()) {
+                input.pop_back();
+                updateInputLine(input, prompt);
+            }
+        } else if (c == 27) {
+            // Escape sequence - check for arrow keys
+            char seq[2];
+            if (read(STDIN_FILENO, &seq[0], 1) == 1 && read(STDIN_FILENO, &seq[1], 1) == 1) {
+                if (seq[0] == '[') {
+                    if (seq[1] == 'A') {
+                        // Up arrow
+                        if (historyIndex == -1) {
+                            // First time navigating - save current
+                            currentInput = input;
+                            historyIndex = 0;
+                        } else {
+                            historyIndex++;
+                        }
+                        
+                        string historyCmd = getHistoryCommand(historyIndex);
+                        if (!historyCmd.empty()) {
+                            input = historyCmd;
+                            updateInputLine(input, prompt);
+                        } else {
+                            // No more history
+                            historyIndex--;
+                        }
+                    } else if (seq[1] == 'B') {
+                        // Down arrow
+                        if (historyIndex > 0) {
+                            historyIndex--;
+                            string historyCmd = getHistoryCommand(historyIndex);
+                            input = historyCmd;
+                            updateInputLine(input, prompt);
+                        } else if (historyIndex == 0) {
+                            // Return to original input
+                            historyIndex = -1;
+                            input = currentInput;
+                            updateInputLine(input, prompt);
+                        }
+                    }
+                }
+            }
+        } else if (c >= 32 && c <= 126) {
+            // Printable character
+            input += c;
+            cout << c;
+            cout.flush();
+        }
+        // Ignore other control characters
+    }
+    
+    disableRawMode();
+    return input;
+}
 
 vector<string> toTokens(const string& buffer) {
     vector<string> tokens;
@@ -224,7 +365,7 @@ vector<string> IORedir(const vector<string>& curr, int& inFd, int& outFd) {
                 return {};
             }
             i++;
-        } else if (curr[i] != "&") { // Skip & symbol when reconstructing command
+        } else if (curr[i] != "&") { // Skip &
             cmdWithoutRedir.push_back(curr[i]);
         }
     }
@@ -432,11 +573,17 @@ void readScript(const string& fileName) {
     }
 }
 
+void cleanup() {
+    disableRawMode();
+}
+
 int main(int argc, char* argv[]) {
+    // Register cleanup function
+    atexit(cleanup);
+    
     signal(SIGINT, handleSignal);
     signal(SIGTSTP, handleSignal);
     signal(SIGCHLD, handleSignal);
-
     signal(SIGTTOU, SIG_IGN);
 
     shellPgid = getpid();
@@ -449,13 +596,14 @@ int main(int argc, char* argv[]) {
     if (argc > 1) {
         readScript(argv[1]);
     } else {
-        cout << "Starting IC shell" << endl;
-        string buffer;
+        cout << "Starting IC shell (↑/↓ to navigate command history)" << endl;
 
         while (true) {
-            cout << "icsh $ ";
-            getline(cin, buffer);
+            string buffer = readInputWithHistory("icsh $ ");
             if (buffer.empty()) continue;
+            
+            addToHistory(buffer);
+            
             vector<string> currBuffer = toTokens(buffer);
             command(currBuffer, prevBuffer, lastExitStatus);
         }
